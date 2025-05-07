@@ -1,0 +1,8 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "physgame"
+version = "0.0.0"
+requires-python = ">=3.12"
