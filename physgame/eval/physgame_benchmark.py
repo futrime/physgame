@@ -152,11 +152,10 @@ def main() -> None:
         )
 
         outputs = model.generate(
-            input_ids=inputs.input_ids,
-            attention_mask=inputs.attention_mask,
-            pixel_values=inputs.pixel_values,
+            **inputs,
             do_sample=False,
-            max_new_tokens=256,
+            max_new_tokens=16,
+            temperature=None,
         )
         assert isinstance(outputs, Tensor)
 
@@ -174,8 +173,6 @@ def main() -> None:
             ],
         )
 
-    print(f"Generated {len(all_model_outputs)} outputs.")
-
     # Gather outputs.
     all_model_outputs = cast(
         List[ModelOutput],
@@ -185,8 +182,6 @@ def main() -> None:
     if not accelerator.is_main_process:
         # Only the main process should save the results.
         return
-
-    print(f"Gathered {len(all_model_outputs)} outputs.")
 
     # Save results.
     logger.info(f"Saving results to {eval_args.output_dir}")
