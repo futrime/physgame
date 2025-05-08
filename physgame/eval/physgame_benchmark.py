@@ -120,6 +120,7 @@ def main() -> None:
 
     model = AutoModelForImageTextToText.from_pretrained(
         eval_args.model,
+        attn_implementation="flash_attention_2",
         device_map=accelerator.device,
         torch_dtype="auto",
         trust_remote_code=True,
@@ -178,6 +179,8 @@ def main() -> None:
         List[ModelOutput],
         accelerator.gather_for_metrics(all_model_outputs, use_gather_object=True),
     )
+
+    accelerator.end_training()
 
     if not accelerator.is_main_process:
         # Only the main process should save the results.
