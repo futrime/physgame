@@ -4,7 +4,7 @@ set -e
 
 source scripts/prepare_env.sh
 
-for file in physgame/eval_api/*.py; do
+for file in physgame/eval_openai/*.py; do
     # Check if the file is __init__.py
     if [ "$(basename "$file")" = "__init__.py" ]; then
         continue
