@@ -3,6 +3,7 @@
 set -e
 
 PERFS=(
+    "physgame"
     "sharegpt"
 )
 
@@ -14,7 +15,7 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 
 export CUDA_VISIBLE_DEVICES
 
-for perf in $PERFS; do
+for perf in "${PERFS[@]}"; do
     file="physgame/perf/${perf}_hf.py"
 
     echo "Running $file"

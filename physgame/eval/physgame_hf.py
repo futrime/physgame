@@ -3,7 +3,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, TypedDict, cast
+from typing import Any, Dict, List, Optional, TypedDict, cast
 
 import loguru
 import numpy as np
@@ -36,6 +36,8 @@ class EvalArgs:
     output_base_dir: str
 
     batch_size: int
+    num_frames: Optional[int]
+    video_fps: Optional[int]
 
     @property
     def eval_name(self) -> str:
@@ -73,13 +75,24 @@ def parse_args() -> EvalArgs:
         type=int,
         default=1,
     )
+    parser.add_argument(
+        "--num-frames",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--video-fps",
+        type=int,
+    )
 
     parsed_args, _ = parser.parse_known_args()
 
     return EvalArgs(
         model=parsed_args.model,
-        batch_size=parsed_args.batch_size,
         output_base_dir=parsed_args.output_base_dir,
+        batch_size=parsed_args.batch_size,
+        num_frames=parsed_args.num_frames,
+        video_fps=parsed_args.video_fps,
     )
 
 
@@ -127,7 +140,9 @@ def main() -> None:
             use_fast=True,
         )
     except OSError as e:
-        if not "does not appear to have a file named preprocessor_config.json" in str(e):
+        if not "does not appear to have a file named preprocessor_config.json" in str(
+            e
+        ):
             raise
 
         if not os.path.exists(model.config._name_or_path):
@@ -149,7 +164,12 @@ def main() -> None:
     ):
         batch: List[DatasetEntry]
 
-        conversations = [make_conversation(entry) for entry in batch]
+        conversations = [
+            make_conversation(
+                entry, num_frames=eval_args.num_frames, video_fps=eval_args.video_fps
+            )
+            for entry in batch
+        ]
 
         inputs = processor.apply_chat_template(
             conversations,
@@ -224,7 +244,6 @@ def main() -> None:
 ##### Per-Eval Code Begin #####
 
 DATASET_DIR = ".dev/PhysGame/PhysGame-Benchmark"
-N_FRAMES = 8
 
 
 type DatasetEntry = PhysGameBenchmarkEntry
@@ -255,32 +274,25 @@ def load_data() -> PhysGameBenchmarkDataset:
     return PhysGameBenchmarkDataset(DATASET_DIR)
 
 
-def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
+def make_conversation(
+    entry: PhysGameBenchmarkEntry,
+    *,
+    num_frames: Optional[int],
+    video_fps: Optional[int],
+) -> List[Dict[str, Any]]:
     video_path = os.path.join(
         DATASET_DIR, "PhysGame-Benchmark", entry["question_id"] + ".mp4"
     )
 
-    video, _ = image_utils.load_video(video_path, num_frames=N_FRAMES)
+    video, _ = image_utils.load_video(video_path, num_frames=num_frames, fps=video_fps)
     video: NDArray[np.uint8]
-    assert video.shape[0] == N_FRAMES
+    assert video.shape[0] == num_frames
 
     images: List[Image] = [
-        image_transforms.to_pil_image(video[i]) for i in range(N_FRAMES)
+        image_transforms.to_pil_image(video[i]) for i in range(video.shape[0])
     ]
 
     return [
-        {
-            "role": "system",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "Watch the video carefully and analyze the events and object movements, "
-                    + "focusing on any inconsistencies with physical laws. "
-                    + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                    + "and select the most accurate option to describe the detected glitch.",
-                }
-            ],
-        },
         {
             "role": "user",
             "content": [
@@ -293,7 +305,12 @@ def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
                 ],
                 {
                     "type": "text",
-                    "text": entry["question"]
+                    "text": "Watch the video carefully and analyze the events and object movements, "
+                    + "focusing on any inconsistencies with physical laws. "
+                    + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
+                    + "and select the most accurate option to describe the detected glitch.\n"
+                    + "Question: "
+                    + entry["question"]
                     + "\n"
                     + "\n".join(
                         [f"({key}) {value}" for key, value in entry["options"].items()]

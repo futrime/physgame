@@ -3,8 +3,8 @@
 set -e
 
 EVALS=(
-    # "physgame"
     "physgame_video"
+    "physgame"
 )
 
 source scripts/prepare_env.sh
@@ -24,7 +24,7 @@ fi
 
 export CUDA_VISIBLE_DEVICES
 
-for eval in $EVALS; do
+for eval in "${EVALS[@]}"; do
     file="physgame/eval/${eval}_hf.py"
 
     echo "Running $file"

@@ -14,8 +14,9 @@ import requests
 import torch
 from tqdm import tqdm
 from transformers.configuration_utils import PretrainedConfig
-from transformers.modeling_utils import PreTrainedModel
+from transformers.feature_extraction_utils import BatchFeature
 from transformers.generation.utils import GenerationMixin
+from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.modeling_auto import (
     AutoModel,
@@ -23,8 +24,12 @@ from transformers.models.auto.modeling_auto import (
     AutoModelForImageTextToText,
     AutoModelForVision2Seq,
 )
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.processing_utils import ProcessorMixin
 from transformers.tokenization_utils_base import BatchEncoding, PreTrainedTokenizerBase
+
+from physgame.eval.physgame_hf import load_data, make_conversation
 
 logger = loguru.logger
 
@@ -53,12 +58,12 @@ class PerfArgs:
             f"{self.perf_name}",
         )
 
+
 def load_model(model_name_or_path: str) -> PreTrainedModel:
     AUTO_CLASSES = [
         AutoModelForImageTextToText,
         AutoModelForVision2Seq,
         AutoModel,
-        AutoModelForCausalLM,
     ]
 
     errors: List[Exception] = []
@@ -83,10 +88,11 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
 
     raise ExceptionGroup(f"Failed to load model {model_name_or_path}", errors)
 
-def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
+
+def load_processor(model_name_or_path: str) -> ProcessorMixin:
     # First try to load the tokenizer from the model name or path.
     try:
-        return AutoTokenizer.from_pretrained(
+        return AutoProcessor.from_pretrained(
             model_name_or_path,
             trust_remote_code=True,
             use_fast=True,
@@ -101,7 +107,7 @@ def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
     )
     assert isinstance(model_config, PretrainedConfig)
 
-    return AutoTokenizer.from_pretrained(
+    return AutoProcessor.from_pretrained(
         model_config._name_or_path,
         trust_remote_code=True,
         use_fast=True,
@@ -129,7 +135,7 @@ def parse_args() -> PerfArgs:
     parser.add_argument(
         "--num-prompts",
         type=int,
-        default=20,
+        default=10,
     )
 
     parsed_args, _ = parser.parse_known_args()
@@ -152,30 +158,24 @@ def main() -> None:
     os.makedirs(perf_args.output_dir, exist_ok=True)
 
     # Load model.
-    tokenizer = load_tokenizer(perf_args.model)
+    processor = load_processor(perf_args.model)
 
     model = load_model(perf_args.model)
 
     # Load data.
-    get_dataset_args = Namespace(
-        dataset_name="sharegpt",
-        dataset_path="",
-        num_prompts=perf_args.num_prompts,
-        sharegpt_output_len=None,
-        sharegpt_context_len=None,
-        prompt_suffix="",
-        apply_chat_template=False,
-    )
-
-    input_requests = get_dataset(get_dataset_args, tokenizer)
+    dataset = load_data()
+    input_requests = [
+        make_conversation(x, num_frames=8, video_fps=None)
+        for x in tqdm([x for x in dataset][: perf_args.num_prompts])
+    ]
 
     # Perform the benchmark.
     # Initialize metrics collection
     metrics = {
         "successful_requests": 0,
         "benchmark_start_time": timeit.default_timer(),
-        "total_input_tokens": sum(x[1] for x in input_requests),
-        "total_output_tokens": sum(x[2] for x in input_requests),
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
         "e2e_latencies": [],
         "ttfts": [],
         "itls": [],
@@ -183,35 +183,36 @@ def main() -> None:
 
     # Process requests in batches
     for i in tqdm(range(0, len(input_requests), perf_args.batch_size)):
-        batch = input_requests[i : i + perf_args.batch_size]
-        prompts = [x[0] for x in batch]
-        prompt_lens = [x[1] for x in batch]
-        output_lens = [x[2] for x in batch]
+        conversations = input_requests[i : i + perf_args.batch_size]
 
-        # Tokenize the inputs
-        inputs = tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
+        inputs = processor.apply_chat_template(
+            conversations,
+            add_generation_prompt=True,
+            padding="longest",
             padding_side="left",
-            truncation=True,
-            max_length=max(prompt_lens),
-        ).to(model.device)
-        assert isinstance(inputs, BatchEncoding)
+            return_dict=True,
+            return_tensors="pt",
+            tokenize=True,
+        )
+        assert isinstance(inputs, BatchFeature)
+        inputs = inputs.to(
+            device=model.device,
+            dtype=model.dtype,
+        )
 
         # Generate tokens and measure timing
-
         gen_args = {
             "do_sample": False,
             "temperature": None,
+            "top_p": None,
+            "top_k": None,
         }
 
         with torch.inference_mode():
             # Measure time to first token
             ttft_start = timeit.default_timer()
             _ = model.generate(
-                input_ids=inputs.input_ids,
-                attention_mask=inputs.attention_mask,
+                **inputs,
                 max_new_tokens=1,
                 **gen_args,
             )
@@ -221,9 +222,8 @@ def main() -> None:
             e2e_start_time = timeit.default_timer()
 
             outputs = model.generate(
-                input_ids=inputs.input_ids,
-                attention_mask=inputs.attention_mask,
-                max_new_tokens=max(output_lens),
+                **inputs,
+                max_new_tokens=256,
                 **gen_args,
             )
             assert isinstance(outputs, torch.Tensor)
@@ -234,8 +234,13 @@ def main() -> None:
         generated_tokens = outputs.shape[1] - inputs.input_ids.shape[1]
         itl = e2e_latency / generated_tokens if generated_tokens > 0 else 0
 
+        metrics["total_input_tokens"] += (
+            inputs.input_ids.shape[1] * perf_args.batch_size
+        )
+        metrics["total_output_tokens"] += generated_tokens * perf_args.batch_size
+
         # Record metrics for each request in the batch
-        for j in range(len(batch)):
+        for j in range(len(conversations)):
             metrics["successful_requests"] += 1
             metrics["e2e_latencies"].append(e2e_latency)
             metrics["ttfts"].append(ttft)
@@ -294,159 +299,6 @@ def main() -> None:
     ) as f:
         json.dump(metrics_summary, f, indent=2)
 
-
-##### Copied from https://github.com/sgl-project/sglang/blob/main/python/sglang/bench_serving.py
-
-ASSISTANT_SUFFIX = "Assistant:"
-SHAREGPT_URL = "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json"
-
-
-def download_and_cache_file(url: str, filename: Optional[str] = None):
-    """Read and cache a file from a url."""
-    if filename is None:
-        filename = os.path.join("/tmp", url.split("/")[-1])
-
-    # Check if the cache file already exists
-    if os.path.exists(filename):
-        return filename
-
-    print(f"Downloading from {url} to {filename}")
-
-    # Stream the response to show the progress bar
-    response = requests.get(url, stream=True)
-    response.raise_for_status()  # Check for request errors
-
-    # Total size of the file in bytes
-    total_size = int(response.headers.get("content-length", 0))
-    chunk_size = 1024  # Download in chunks of 1KB
-
-    # Use tqdm to display the progress bar
-    with (
-        open(filename, "wb") as f,
-        tqdm(
-            desc=filename,
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar,
-    ):
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            f.write(chunk)
-            bar.update(len(chunk))
-
-    return filename
-
-
-def get_dataset(args, tokenizer):
-    if args.dataset_name == "sharegpt":
-        input_requests = sample_sharegpt_requests(
-            dataset_path=args.dataset_path,
-            num_requests=args.num_prompts,
-            tokenizer=tokenizer,
-            fixed_output_len=args.sharegpt_output_len,
-            context_len=args.sharegpt_context_len,
-            prompt_suffix=args.prompt_suffix,
-            apply_chat_template=args.apply_chat_template,
-        )
-    else:
-        raise ValueError(f"Unknown dataset: {args.dataset_name}")
-    return input_requests
-
-
-def remove_prefix(text: str, prefix: str) -> str:
-    return text[len(prefix) :] if text.startswith(prefix) else text
-
-
-def remove_suffix(text: str, suffix: str) -> str:
-    return text[: -len(suffix)] if text.endswith(suffix) else text
-
-
-def sample_sharegpt_requests(
-    dataset_path: str,
-    num_requests: int,
-    tokenizer: PreTrainedTokenizerBase,
-    fixed_output_len: Optional[int] = None,
-    context_len: Optional[int] = None,
-    prompt_suffix: Optional[str] = "",
-    apply_chat_template=False,
-) -> List[Tuple[str, int, int]]:
-    if fixed_output_len is not None and fixed_output_len < 4:
-        raise ValueError("output_len too small")
-
-    # Download sharegpt if necessary
-    if not os.path.isfile(dataset_path) and dataset_path == "":
-        dataset_path = download_and_cache_file(SHAREGPT_URL)
-
-    # Load the dataset.
-    with open(dataset_path) as f:
-        dataset = json.load(f)
-
-    # Filter out the conversations with less than 2 turns.
-    dataset = [
-        data
-        for data in dataset
-        if len(data.get("conversations", data.get("conversation", []))) >= 2
-    ]
-    # Only keep the first two turns of each conversation.
-    dataset = [
-        (
-            data.get("conversations", data.get("conversation", []))[0]["value"],
-            data.get("conversations", data.get("conversation", []))[1]["value"],
-        )
-        for data in dataset
-    ]
-
-    # Shuffle the dataset.
-    random.shuffle(dataset)
-
-    # Filter out sequences that are too long or too short
-    filtered_dataset: List[Tuple[str, int, int]] = []
-    for i in range(len(dataset)):
-        if len(filtered_dataset) == num_requests:
-            break
-
-        # Tokenize the prompts and completions.
-        prompt = dataset[i][0]
-        if prompt_suffix:
-            prompt = (
-                remove_suffix(prompt, ASSISTANT_SUFFIX)
-                + prompt_suffix
-                + ASSISTANT_SUFFIX
-            )
-
-        if apply_chat_template:
-            prompt = tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
-                add_generation_prompt=True,
-                tokenize=False,
-            )
-            prompt = cast(str, prompt).replace(cast(str, tokenizer.bos_token), "")
-
-        prompt_token_ids = tokenizer.encode(prompt)
-        completion = dataset[i][1]
-        completion_token_ids = tokenizer.encode(completion)
-        prompt_len = len(prompt_token_ids)
-        output_len = (
-            len(completion_token_ids) if fixed_output_len is None else fixed_output_len
-        )
-
-        if prompt_len < 2 or output_len < 2:
-            # Prune too short sequences.
-            continue
-
-        if context_len and prompt_len + output_len > context_len:
-            # Prune too long sequences.
-            continue
-
-        filtered_dataset.append((prompt, prompt_len, output_len))
-
-    logger.info(f"#Input tokens: {np.sum([x[1] for x in filtered_dataset])}")
-    logger.info(f"#Output tokens: {np.sum([x[2] for x in filtered_dataset])}")
-    return filtered_dataset
-
-
-##### End of copied code.
 
 if __name__ == "__main__":
     main()
