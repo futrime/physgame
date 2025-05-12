@@ -3,16 +3,11 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, TypedDict, cast
+from typing import Any, Dict, List, Optional, TypedDict, cast
 
 import loguru
-import numpy as np
 import tqdm
-import transformers.image_transforms as image_transforms
-import transformers.image_utils as image_utils
 from accelerate import Accelerator
-from numpy.typing import NDArray
-from PIL.Image import Image
 from torch import Tensor
 from torch.utils.data import DataLoader
 from transformers.feature_extraction_utils import BatchFeature
@@ -36,6 +31,8 @@ class EvalArgs:
     output_base_dir: str
 
     batch_size: int
+    num_frames: Optional[int]
+    video_fps: Optional[int]
 
     @property
     def eval_name(self) -> str:
@@ -73,13 +70,23 @@ def parse_args() -> EvalArgs:
         type=int,
         default=1,
     )
+    parser.add_argument(
+        "--num-frames",
+        type=int,
+    )
+    parser.add_argument(
+        "--video-fps",
+        type=int,
+    )
 
     parsed_args, _ = parser.parse_known_args()
 
     return EvalArgs(
         model=parsed_args.model,
-        batch_size=parsed_args.batch_size,
         output_base_dir=parsed_args.output_base_dir,
+        batch_size=parsed_args.batch_size,
+        num_frames=parsed_args.num_frames,
+        video_fps=parsed_args.video_fps,
     )
 
 
@@ -111,21 +118,37 @@ def main() -> None:
     dataloader = cast(DataLoader, accelerator.prepare(dataloader))
 
     # Prepare model.
-    processor = AutoProcessor.from_pretrained(
-        eval_args.model,
-        trust_remote_code=True,
-        use_fast=True,
-    )
-    assert isinstance(processor, ProcessorMixin)
-
     model = AutoModelForImageTextToText.from_pretrained(
         eval_args.model,
-        attn_implementation="flash_attention_2",
+        # attn_implementation="flash_attention_2",
         device_map=accelerator.device,
         torch_dtype="auto",
         trust_remote_code=True,
     )
     assert isinstance(model, PreTrainedModel)
+
+    try:
+        processor = AutoProcessor.from_pretrained(
+            eval_args.model,
+            trust_remote_code=True,
+            use_fast=True,
+        )
+    except OSError as e:
+        if not "does not appear to have a file named preprocessor_config.json" in str(
+            e
+        ):
+            raise
+
+        if not os.path.exists(model.config._name_or_path):
+            raise
+
+        processor = AutoProcessor.from_pretrained(
+            model.config._name_or_path,
+            trust_remote_code=True,
+            use_fast=False,
+        )
+
+    assert isinstance(processor, ProcessorMixin)
 
     all_model_outputs: List[ModelOutput] = []
 
@@ -140,11 +163,13 @@ def main() -> None:
         inputs = processor.apply_chat_template(
             conversations,
             add_generation_prompt=True,
+            num_frames=eval_args.num_frames,
             padding=PaddingStrategy.LONGEST,
             padding_side="left",
             return_dict=True,
             return_tensors="pt",
             tokenize=True,
+            video_fps=eval_args.video_fps,
         )
         assert isinstance(inputs, BatchFeature)
         inputs = inputs.to(
@@ -209,8 +234,9 @@ def main() -> None:
 
 ##### Per-Eval Code Begin #####
 
-DATASET_DIR = ".dev/PhysGame/PhysGame-Benchmark"
-N_FRAMES = 8
+DATASET_DIR = (
+    "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysGame-Benchmark"
+)
 
 
 type DatasetEntry = PhysGameBenchmarkEntry
@@ -246,40 +272,22 @@ def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
         DATASET_DIR, "PhysGame-Benchmark", entry["question_id"] + ".mp4"
     )
 
-    video, _ = image_utils.load_video(video_path, num_frames=N_FRAMES)
-    video: NDArray[np.uint8]
-    assert video.shape[0] == N_FRAMES
-
-    images: List[Image] = [
-        image_transforms.to_pil_image(video[i]) for i in range(N_FRAMES)
-    ]
-
     return [
         {
-            "role": "system",
+            "role": "user",
             "content": [
+                {
+                    "type": "video",
+                    "path": video_path,
+                },
                 {
                     "type": "text",
                     "text": "Watch the video carefully and analyze the events and object movements, "
                     + "focusing on any inconsistencies with physical laws. "
                     + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                    + "and select the most accurate option to describe the detected glitch.",
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                *[
-                    {
-                        "type": "image",
-                        "image": image,
-                    }
-                    for image in images
-                ],
-                {
-                    "type": "text",
-                    "text": entry["question"]
+                    + "and select the most accurate option to describe the detected glitch.\n"
+                    + "Question: "
+                    + entry["question"]
                     + "\n"
                     + "\n".join(
                         [f"({key}) {value}" for key, value in entry["options"].items()]

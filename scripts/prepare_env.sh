@@ -2,11 +2,15 @@
 
 set -e
 
+CONDA_ENV=${CONDA_ENV:-"physgame"}
+
+echo "CONDA_ENV: $CONDA_ENV"
+
 eval "$(conda shell.bash hook)"
 
-if conda info --envs | grep -q '^physgame '; then
-    conda activate physgame
+if conda info --envs | grep -q "^$CONDA_ENV "; then
+    conda activate $CONDA_ENV
 else
-    echo "Conda environment 'physgame' not found. Please create it first."
+    echo "Conda environment '$CONDA_ENV' not found. Please create it first."
     exit 1
 fi

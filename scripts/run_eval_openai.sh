@@ -2,15 +2,14 @@
 
 set -e
 
+EVALS=(
+    "physgame"
+)
+
 source scripts/prepare_env.sh
 
-for file in physgame/eval_openai/*.py; do
-    # Check if the file is __init__.py
-    if [ "$(basename "$file")" = "__init__.py" ]; then
-        continue
-    fi
-
-    EVAL_NAME=$(basename "$file" .py)
+for eval in $EVALS; do
+    file="physgame/eval/${eval}_openai.py"
 
     echo "Running $file"
 
