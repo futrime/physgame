@@ -9,7 +9,6 @@ import transformers.trainer_utils as trainer_utils
 import wandb
 from accelerate import Accelerator
 from datasets import Dataset
-from torch import Tensor
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import AutoModelForImageTextToText
@@ -111,7 +110,7 @@ def main() -> None:
     accelerator = Accelerator()
 
     train_args = TrainArgs(
-        model="Qwen/Qwen2.5-VL-3B-Instruct",
+        model="Qwen/Qwen2.5-VL-7B-Instruct",
         output_base_dir="runs/train",
         num_frames=8,
     )
@@ -125,7 +124,7 @@ def main() -> None:
             "skip_prepare_dataset": True,
         },
         do_train=True,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=4,
         gradient_checkpointing=True,
         learning_rate=2e-5,
         logging_steps=1,
@@ -133,13 +132,13 @@ def main() -> None:
         num_train_epochs=1,
         optim="adamw_torch",
         output_dir=model_output_dir,
-        per_device_train_batch_size=4,
+        per_device_train_batch_size=3,
         remove_unused_columns=False,
         report_to="wandb",
         save_steps=100,
         save_strategy="steps",
         save_total_limit=2,
-        torch_empty_cache_steps=1,
+        # torch_empty_cache_steps=1,
         warmup_ratio=0.03,
         weight_decay=0.0,
     )
@@ -155,32 +154,32 @@ def main() -> None:
 
     # 2. Load model.
 
-    model_path = "Qwen/Qwen2.5-VL-3B-Instruct"
-
     processor = AutoProcessor.from_pretrained(
-        model_path,
+        train_args.model,
         trust_remote_code=True,
         use_fast=True,
     )
     assert isinstance(processor, ProcessorMixin)
 
     tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
+        train_args.model,
         trust_remote_code=True,
         use_fast=True,
     )
     assert isinstance(tokenizer, PreTrainedTokenizerBase)
 
     model = AutoModelForImageTextToText.from_pretrained(
-        model_path,
+        train_args.model,
         attn_implementation="flash_attention_2",
         torch_dtype="bfloat16",
         trust_remote_code=True,
     )
     assert isinstance(model, PreTrainedModel)
 
+    if isinstance(model, Qwen2_5_VLForConditionalGeneration):
+        model.visual.requires_grad_(False)
+
     model.train()
-    model.config.use_cache = False
 
     # 3. Fine-tune model.
 
@@ -188,11 +187,11 @@ def main() -> None:
         prompt_inputs = processor.apply_chat_template(
             [entry["prompt"] for entry in entries],
             num_frames=train_args.num_frames,
-            # do_resize=True,
-            # size={
-            #     "longest_edge": 1280 * 720,
-            #     "shortest_edge": 0,
-            # },
+            do_resize=True,
+            size={
+                "longest_edge": 1280 * 720,
+                "shortest_edge": 0,
+            },
             padding="longest",
             padding_side="right",
             return_dict=True,

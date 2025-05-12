@@ -39,9 +39,3 @@ class PhysInstructDataset(Dataset[PhysInstructEntry]):
 
     def __len__(self) -> int:
         return len(self._entries)
-
-
-if __name__ == "__main__":
-    dataset = PhysInstructDataset(".dev/PhysGame/PhysInstruct-40k")
-    print(len(dataset))
-    print(dataset[0])
