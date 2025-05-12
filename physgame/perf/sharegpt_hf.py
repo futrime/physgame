@@ -14,8 +14,8 @@ import requests
 import torch
 from tqdm import tqdm
 from transformers.configuration_utils import PretrainedConfig
-from transformers.modeling_utils import PreTrainedModel
 from transformers.generation.utils import GenerationMixin
+from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.modeling_auto import (
     AutoModel,
@@ -53,6 +53,7 @@ class PerfArgs:
             f"{self.perf_name}",
         )
 
+
 def load_model(model_name_or_path: str) -> PreTrainedModel:
     AUTO_CLASSES = [
         AutoModelForImageTextToText,
@@ -67,8 +68,8 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
         try:
             model = model_class.from_pretrained(
                 model_name_or_path,
-                # attn_implementation="sdpa",
-                device_map="auto",
+                attn_implementation="flash_attention_2",
+                device_map=f"cuda:{torch.cuda.current_device()}",
                 torch_dtype="bfloat16",
                 trust_remote_code=True,
             )
@@ -82,6 +83,7 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
             errors.append(e)
 
     raise ExceptionGroup(f"Failed to load model {model_name_or_path}", errors)
+
 
 def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
     # First try to load the tokenizer from the model name or path.

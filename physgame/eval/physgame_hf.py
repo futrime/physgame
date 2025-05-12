@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, TypedDict, cast
 
 import loguru
 import numpy as np
+import torch
 import tqdm
 import transformers.image_transforms as image_transforms
 import transformers.image_utils as image_utils
@@ -15,9 +16,17 @@ from numpy.typing import NDArray
 from PIL.Image import Image
 from torch import Tensor
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers.configuration_utils import PretrainedConfig
 from transformers.feature_extraction_utils import BatchFeature
+from transformers.generation.utils import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
-from transformers.models.auto.modeling_auto import AutoModelForImageTextToText
+from transformers.models.auto.configuration_auto import AutoConfig
+from transformers.models.auto.modeling_auto import (
+    AutoModel,
+    AutoModelForImageTextToText,
+    AutoModelForVision2Seq,
+)
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.processing_utils import ProcessorMixin
 from transformers.utils.generic import PaddingStrategy
@@ -54,6 +63,61 @@ class EvalArgs:
             f"{model_name}",
             f"{self.eval_name}",
         )
+
+
+def load_model(model_name_or_path: str) -> PreTrainedModel:
+    AUTO_CLASSES = [
+        AutoModelForImageTextToText,
+        AutoModelForVision2Seq,
+        AutoModel,
+    ]
+
+    errors: List[Exception] = []
+
+    for model_class in AUTO_CLASSES:
+        try:
+            model = model_class.from_pretrained(
+                model_name_or_path,
+                attn_implementation="flash_attention_2",
+                device_map=f"cuda:{torch.cuda.current_device()}", # Should not be "auto".
+                torch_dtype="bfloat16",
+                trust_remote_code=True,
+            )
+
+            if not isinstance(model, GenerationMixin):
+                continue
+
+            return cast(PreTrainedModel, model)
+
+        except Exception as e:
+            errors.append(e)
+
+    raise ExceptionGroup(f"Failed to load model {model_name_or_path}", errors)
+
+
+def load_processor(model_name_or_path: str) -> ProcessorMixin:
+    # First try to load the tokenizer from the model name or path.
+    try:
+        return AutoProcessor.from_pretrained(
+            model_name_or_path,
+            trust_remote_code=True,
+            use_fast=True,
+        )
+    except:
+        pass
+
+    # Then try to load the tokenizer from the model config.
+    model_config = AutoConfig.from_pretrained(
+        model_name_or_path,
+        trust_remote_code=True,
+    )
+    assert isinstance(model_config, PretrainedConfig)
+
+    return AutoProcessor.from_pretrained(
+        model_config._name_or_path,
+        trust_remote_code=True,
+        use_fast=True,
+    )
 
 
 def parse_args() -> EvalArgs:
@@ -124,42 +188,14 @@ def main() -> None:
     dataloader = cast(DataLoader, accelerator.prepare(dataloader))
 
     # Prepare model.
-    model = AutoModelForImageTextToText.from_pretrained(
-        eval_args.model,
-        # attn_implementation="flash_attention_2",
-        device_map=accelerator.device,
-        torch_dtype="auto",
-        trust_remote_code=True,
-    )
-    assert isinstance(model, PreTrainedModel)
+    processor = load_processor(eval_args.model)
 
-    try:
-        processor = AutoProcessor.from_pretrained(
-            eval_args.model,
-            trust_remote_code=True,
-            use_fast=True,
-        )
-    except OSError as e:
-        if not "does not appear to have a file named preprocessor_config.json" in str(
-            e
-        ):
-            raise
-
-        if not os.path.exists(model.config._name_or_path):
-            raise
-
-        processor = AutoProcessor.from_pretrained(
-            model.config._name_or_path,
-            trust_remote_code=True,
-            use_fast=False,
-        )
-
-    assert isinstance(processor, ProcessorMixin)
+    model = load_model(eval_args.model)
 
     all_model_outputs: List[ModelOutput] = []
 
     # Generate outputs.
-    for batch in tqdm.tqdm(
+    for batch in tqdm(
         dataloader, desc="Generating outputs", disable=not accelerator.is_main_process
     ):
         batch: List[DatasetEntry]
@@ -191,6 +227,8 @@ def main() -> None:
             do_sample=False,
             max_new_tokens=16,
             temperature=None,
+            top_p=None,
+            top_k=None,
         )
         assert isinstance(outputs, Tensor)
 
@@ -258,7 +296,7 @@ class ModelOutput(TypedDict):
 def check_answers(model_outputs: List[ModelOutput]) -> Dict[str, float]:
     correct = 0
 
-    for model_output in tqdm.tqdm(model_outputs, desc="Checking answers"):
+    for model_output in tqdm(model_outputs, desc="Checking answers"):
         match = re.search(r"\(?([A-D])\)", model_output["output"])
         if match and match.group(1) == model_output["answer"]:
             correct += 1
@@ -294,6 +332,18 @@ def make_conversation(
 
     return [
         {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Watch the video carefully and analyze the events and object movements, "
+                    + "focusing on any inconsistencies with physical laws. "
+                    + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
+                    + "and select the most accurate option to describe the detected glitch.\n",
+                },
+            ],
+        },
+        {
             "role": "user",
             "content": [
                 *[
@@ -305,12 +355,7 @@ def make_conversation(
                 ],
                 {
                     "type": "text",
-                    "text": "Watch the video carefully and analyze the events and object movements, "
-                    + "focusing on any inconsistencies with physical laws. "
-                    + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                    + "and select the most accurate option to describe the detected glitch.\n"
-                    + "Question: "
-                    + entry["question"]
+                    "text": entry["question"]
                     + "\n"
                     + "\n".join(
                         [f"({key}) {value}" for key, value in entry["options"].items()]

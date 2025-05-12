@@ -2,15 +2,13 @@
 
 import json
 import os
-import random
 import timeit
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, cast
+from typing import List, cast
 
 import loguru
 import numpy as np
-import requests
 import torch
 from tqdm import tqdm
 from transformers.configuration_utils import PretrainedConfig
@@ -20,14 +18,11 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.modeling_auto import (
     AutoModel,
-    AutoModelForCausalLM,
     AutoModelForImageTextToText,
     AutoModelForVision2Seq,
 )
 from transformers.models.auto.processing_auto import AutoProcessor
-from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.processing_utils import ProcessorMixin
-from transformers.tokenization_utils_base import BatchEncoding, PreTrainedTokenizerBase
 
 from physgame.eval.physgame_hf import load_data, make_conversation
 
@@ -72,8 +67,8 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
         try:
             model = model_class.from_pretrained(
                 model_name_or_path,
-                # attn_implementation="sdpa",
-                device_map="auto",
+                attn_implementation="flash_attention_2",
+                device_map=f"cuda:{torch.cuda.current_device()}",
                 torch_dtype="bfloat16",
                 trust_remote_code=True,
             )

@@ -13,14 +13,9 @@ CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-$(seq -s, 0 $(($(nvidia-smi --list-
 
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 
-# Get N_GPUS from CUDA_VISIBLE_DEVICES if it's set, otherwise from nvidia-smi
-if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
-    # Count the number of GPUs in CUDA_VISIBLE_DEVICES (comma-separated list)
-    N_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
-else
-    # If CUDA_VISIBLE_DEVICES is not set, use all available GPUs
-    N_GPUS=$(nvidia-smi --list-gpus | wc -l)
-fi
+N_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+
+echo "Number of GPUs: $N_GPUS"
 
 export CUDA_VISIBLE_DEVICES
 

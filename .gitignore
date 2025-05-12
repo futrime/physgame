@@ -177,4 +177,5 @@ cython_debug/
 
 .vscode/
 .dev/
+archive/
 runs/
