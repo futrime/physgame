@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 import datetime
 import os
 from dataclasses import dataclass
@@ -126,19 +127,46 @@ def prepare_dataset() -> Dataset:
 
     return dataset
 
+def parse_args() -> TrainArgs:
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+    )
+    parser.add_argument(
+        "--output-base-dir",
+        type=str,
+        required=True,
+    )
+    parser.add_argument(
+        "--num-frames",
+        type=int,
+        default=8,
+    )
+
+    args, _ = parser.parse_known_args()
+
+    return TrainArgs(
+        model=args.model,
+        output_base_dir=args.output_base_dir,
+        num_frames=args.num_frames,
+    )
 
 def main() -> None:
     dotenv.load_dotenv()
 
     accelerator = Accelerator()
 
-    train_args = TrainArgs(
-        model="Qwen/Qwen2.5-VL-7B-Instruct",
-        output_base_dir="runs/train",
-        num_frames=8,
-    )
+    train_args = parse_args()
+
+    if accelerator.is_main_process:
+        logger.info(f"Running {train_args.train_name} evaluation with args: {train_args}")
+        logger.info(f"Results will be saved to {train_args.output_dir}")
 
     model_output_dir = os.path.join(train_args.output_dir, "model")
+
+    os.makedirs(model_output_dir, exist_ok=True)
 
     trainer_config = DPOConfig(
         # auto_find_batch_size=False,
@@ -170,6 +198,7 @@ def main() -> None:
         wandb.init(
             dir=os.path.join(train_args.output_dir, "wandb"),
             name=trainer_config.run_name,
+            group=f"{train_args.model_name}-{train_args.train_name}",
         )
 
     # 1. Load dataset.

@@ -4,7 +4,6 @@ set -e
 
 EVALS=(
     "physgame_video"
-    "physgame"
 )
 
 source scripts/prepare_env.sh

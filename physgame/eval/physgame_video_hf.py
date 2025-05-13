@@ -137,7 +137,6 @@ def parse_args() -> EvalArgs:
     parser.add_argument(
         "--num-frames",
         type=int,
-        default=8,
     )
     parser.add_argument(
         "--video-fps",
@@ -146,13 +145,19 @@ def parse_args() -> EvalArgs:
 
     parsed_args, _ = parser.parse_known_args()
 
-    return EvalArgs(
+    eval_args = EvalArgs(
         model=parsed_args.model,
         output_base_dir=parsed_args.output_base_dir,
         batch_size=parsed_args.batch_size,
         num_frames=parsed_args.num_frames,
         video_fps=parsed_args.video_fps,
     )
+
+    if eval_args.num_frames is None and eval_args.video_fps is None:
+        # If both num_frames and video_fps are None, use the default of 8.
+        eval_args.num_frames = 8
+
+    return eval_args
 
 
 def main() -> None:

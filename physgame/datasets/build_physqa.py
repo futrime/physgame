@@ -147,11 +147,15 @@ async def main() -> None:
 
     async def gen_worker() -> None:
         while not stopped:
+            await asyncio.sleep(0.1) # To avoid busy waiting.
+
             try:
                 idx, pi_entry = pi_entry_queue.get_nowait()
             except QueueEmpty:
                 await asyncio.sleep(0.1)
                 continue
+
+            pi_entry_queue.task_done()
 
             video_path = os.path.join(
                 PI_VIDEO_DIR,
@@ -161,6 +165,13 @@ async def main() -> None:
             try:
                 with open(video_path, "rb") as f:
                     video_bytes = await asyncio.to_thread(f.read)
+
+                # Skip if exceeding Gemini's limit (314572800 bytes) and preserve a safe redundancy.
+                if len(video_bytes) > 16 * 1024 * 1024:
+                    logger.warning(
+                        f"Video of PhysInstruct entry {idx} is too large ({len(video_bytes) / 1024 / 1024:.2f}MB > 16MB). Skipping."
+                    )
+                    continue
 
                 response = await client.aio.models.generate_content(
                     model="gemini-2.0-flash",
@@ -256,9 +267,10 @@ async def main() -> None:
         if pi_entry_queue.qsize() >= dataset_args.save_interval:
             await save_pqa_entries()
 
+    logger.info("Waiting for all entries to be processed...")
     await pi_entry_queue.join()
 
-    # Wait for all tasks to finish.
+    logger.info("All entries processed. Stopping workers...")
     stopped = True
     await asyncio.gather(*tasks)
 

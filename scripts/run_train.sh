@@ -2,9 +2,19 @@
 
 set -e
 
-source scripts/prepare_env.sh
-
-script_name=$1
+PRESET=$1
 shift
 
-accelerate launch physgame/train/${script_name}.py "$@"
+echo "PRESET: ${PRESET}"
+
+# Check if the preset file exists
+if [ ! -f "physgame/train/${PRESET}.py" ]; then
+    echo "Error: Preset '${PRESET}' not found at physgame/train/${PRESET}.py"
+    exit 1
+fi
+
+source scripts/prepare_env.sh
+
+accelerate launch physgame/train/${PRESET}.py \
+    --output-base-dir runs/train \
+    $@

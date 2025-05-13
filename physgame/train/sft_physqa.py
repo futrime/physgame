@@ -23,10 +23,12 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from trl import SFTConfig, SFTTrainer
 
 from physgame.datasets.physinstruct import PhysInstructDataset
+from physgame.datasets.physqa import PhysQADataset
 
 logger = loguru.logger
 
 PHYSINSTRUCT_DATASET_PATH = ".dev/PhysGame/PhysInstruct-40k"
+PHYSQA_DATASET_PATH = "runs/datasets/physqa"
 
 
 @dataclass
@@ -64,13 +66,24 @@ class PromptCompletionEntry(TypedDict):
 
 def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
     physinstruct = PhysInstructDataset(PHYSINSTRUCT_DATASET_PATH)
+    physqa = PhysQADataset(
+        PHYSQA_DATASET_PATH, pi_dataset_dir=PHYSINSTRUCT_DATASET_PATH
+    )
 
     if max_dataset_size is None:
-        max_dataset_size = len(physinstruct)
+        max_dataset_size = len(physinstruct) + len(physqa)
 
     def gen() -> Generator[PromptCompletionEntry, None, None]:
-        for idx in range(min(len(physinstruct), max_dataset_size)):
-            entry = physinstruct[idx]
+        for idx in range(min(len(physinstruct) * 2, len(physqa) * 2, max_dataset_size)):
+            dataset_idx = idx // 2
+
+            do_gen_from_physqa = idx % 2 == 1
+
+            entry = (
+                physqa[dataset_idx]
+                if not do_gen_from_physqa
+                else physinstruct[dataset_idx]
+            )
 
             prompt_completion = PromptCompletionEntry(
                 prompt=[
@@ -82,7 +95,11 @@ def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
                                 "text": "Watch the video carefully and analyze the events and object movements, "
                                 + "focusing on any inconsistencies with physical laws. "
                                 + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                                + "and accurately describe the detected glitch.\n",
+                                + (
+                                    "and select the most accurate option to describe the detected glitch.\n"
+                                    if do_gen_from_physqa
+                                    else "and accurately describe the detected glitch.\n"
+                                ),
                             },
                         ],
                     },
