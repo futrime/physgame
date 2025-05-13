@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 
 
 class PhysInstructEntry(TypedDict):
-    video: str
+    video_path: str
     question: str
     answer: str
 
@@ -26,7 +26,9 @@ class PhysInstructDataset(Dataset[PhysInstructEntry]):
 
         self._entries = [
             PhysInstructEntry(
-                video=os.path.join(dataset_dir, "PhysInstruct", raw_entry["video"]),
+                video_path=os.path.join(
+                    dataset_dir, "PhysInstruct", raw_entry["video"]
+                ),
                 question=qa["q"],
                 answer=qa["a"],
             )

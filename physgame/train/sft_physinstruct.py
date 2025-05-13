@@ -1,3 +1,4 @@
+import datetime
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, TypedDict, cast
@@ -74,7 +75,7 @@ def prepare_dataset() -> Dataset:
                         "content": [
                             {
                                 "type": "video",
-                                "path": entry["video"],
+                                "path": entry["video_path"],
                             },
                             {
                                 "type": "text",
@@ -135,6 +136,7 @@ def main() -> None:
         per_device_train_batch_size=3,
         remove_unused_columns=False,
         report_to="wandb",
+        run_name=f"{train_args.model_name}-{train_args.train_name}-{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         save_steps=100,
         save_strategy="steps",
         save_total_limit=2,
@@ -146,6 +148,7 @@ def main() -> None:
     if accelerator.is_main_process:
         wandb.init(
             dir=os.path.join(train_args.output_dir, "wandb"),
+            name=trainer_config.run_name,
         )
 
     # 1. Load dataset.

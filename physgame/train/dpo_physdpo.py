@@ -158,7 +158,7 @@ def main() -> None:
         remove_unused_columns=False,
         report_to="wandb",
         run_name=f"{train_args.model_name}-{train_args.train_name}-{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        save_steps=100,
+        save_steps=10,
         save_strategy="steps",
         save_total_limit=2,
         torch_empty_cache_steps=1,
