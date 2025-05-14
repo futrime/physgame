@@ -67,7 +67,7 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
         try:
             model = model_class.from_pretrained(
                 model_name_or_path,
-                attn_implementation="flash_attention_2",
+                # attn_implementation="flash_attention_2",
                 device_map=f"cuda:{torch.cuda.current_device()}",
                 torch_dtype="bfloat16",
                 trust_remote_code=True,
@@ -90,7 +90,7 @@ def load_processor(model_name_or_path: str) -> ProcessorMixin:
         return AutoProcessor.from_pretrained(
             model_name_or_path,
             trust_remote_code=True,
-            use_fast=True,
+            # use_fast=True,
         )
     except:
         pass
@@ -105,7 +105,7 @@ def load_processor(model_name_or_path: str) -> ProcessorMixin:
     return AutoProcessor.from_pretrained(
         model_config._name_or_path,
         trust_remote_code=True,
-        use_fast=True,
+        # use_fast=True,
     )
 
 
@@ -130,7 +130,7 @@ def parse_args() -> PerfArgs:
     parser.add_argument(
         "--num-prompts",
         type=int,
-        default=10,
+        default=100,
     )
 
     parsed_args, _ = parser.parse_known_args()
@@ -147,7 +147,7 @@ def main() -> None:
     perf_args = parse_args()
 
     if os.path.exists(os.path.join(perf_args.output_dir, "metrics.json")):
-        logger.info(f"Evaluation already completed. Skipping...")
+        logger.info("Evaluation already completed. Skipping...")
         return
 
     os.makedirs(perf_args.output_dir, exist_ok=True)
@@ -160,7 +160,7 @@ def main() -> None:
     # Load data.
     dataset = load_data()
     input_requests = [
-        make_conversation(x, num_frames=8, video_fps=None)
+        make_conversation(x)
         for x in tqdm([x for x in dataset][: perf_args.num_prompts])
     ]
 
@@ -183,11 +183,13 @@ def main() -> None:
         inputs = processor.apply_chat_template(
             conversations,
             add_generation_prompt=True,
+            num_frames=8,
             padding="longest",
             padding_side="left",
             return_dict=True,
             return_tensors="pt",
             tokenize=True,
+            video_load_backend="opencv",
         )
         assert isinstance(inputs, BatchFeature)
         inputs = inputs.to(

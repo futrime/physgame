@@ -68,7 +68,7 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
         try:
             model = model_class.from_pretrained(
                 model_name_or_path,
-                attn_implementation="flash_attention_2",
+                # attn_implementation="flash_attention_2",
                 device_map=f"cuda:{torch.cuda.current_device()}",
                 torch_dtype="bfloat16",
                 trust_remote_code=True,
@@ -91,7 +91,7 @@ def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
         return AutoTokenizer.from_pretrained(
             model_name_or_path,
             trust_remote_code=True,
-            use_fast=True,
+            # use_fast=True,
         )
     except:
         pass
@@ -106,7 +106,7 @@ def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
     return AutoTokenizer.from_pretrained(
         model_config._name_or_path,
         trust_remote_code=True,
-        use_fast=True,
+        # use_fast=True,
     )
 
 
@@ -131,7 +131,7 @@ def parse_args() -> PerfArgs:
     parser.add_argument(
         "--num-prompts",
         type=int,
-        default=20,
+        default=100,
     )
 
     parsed_args, _ = parser.parse_known_args()
@@ -206,6 +206,8 @@ def main() -> None:
         gen_args = {
             "do_sample": False,
             "temperature": None,
+            "top_k": None,
+            "top_p": None,
         }
 
         with torch.inference_mode():
