@@ -6,14 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TypedDict, cast
 
 import loguru
-import numpy as np
 import torch
 import tqdm
-import transformers.image_transforms as image_transforms
-import transformers.image_utils as image_utils
 from accelerate import Accelerator
-from numpy.typing import NDArray
-from PIL.Image import Image
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -79,7 +74,7 @@ def load_model(model_name_or_path: str) -> PreTrainedModel:
             model = model_class.from_pretrained(
                 model_name_or_path,
                 attn_implementation="flash_attention_2",
-                device_map=f"cuda:{torch.cuda.current_device()}", # Should not be "auto".
+                device_map=f"cuda:{torch.cuda.current_device()}",
                 torch_dtype="bfloat16",
                 trust_remote_code=True,
             )
@@ -205,21 +200,19 @@ def main() -> None:
     ):
         batch: List[DatasetEntry]
 
-        conversations = [
-            make_conversation(
-                entry, num_frames=eval_args.num_frames, video_fps=eval_args.video_fps
-            )
-            for entry in batch
-        ]
+        conversations = [make_conversation(entry) for entry in batch]
 
         inputs = processor.apply_chat_template(
             conversations,
             add_generation_prompt=True,
+            num_frames=eval_args.num_frames,
             padding=PaddingStrategy.LONGEST,
             padding_side="left",
             return_dict=True,
             return_tensors="pt",
             tokenize=True,
+            video_fps=eval_args.video_fps,
+            video_load_backend="opencv",
         )
         assert isinstance(inputs, BatchFeature)
         inputs = inputs.to(
@@ -286,7 +279,9 @@ def main() -> None:
 
 ##### Per-Eval Code Begin #####
 
-DATASET_DIR = ".dev/PhysGame/PhysGame-Benchmark"
+DATASET_DIR = (
+    "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysGame-Benchmark"
+)
 
 
 type DatasetEntry = PhysGameBenchmarkEntry
@@ -317,23 +312,10 @@ def load_data() -> PhysGameBenchmarkDataset:
     return PhysGameBenchmarkDataset(DATASET_DIR)
 
 
-def make_conversation(
-    entry: PhysGameBenchmarkEntry,
-    *,
-    num_frames: Optional[int],
-    video_fps: Optional[int],
-) -> List[Dict[str, Any]]:
+def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
     video_path = os.path.join(
         DATASET_DIR, "PhysGame-Benchmark", entry["question_id"] + ".mp4"
     )
-
-    video, _ = image_utils.load_video(video_path, num_frames=num_frames, fps=video_fps)
-    video: NDArray[np.uint8]
-    assert video.shape[0] == num_frames
-
-    images: List[Image] = [
-        image_transforms.to_pil_image(video[i]) for i in range(video.shape[0])
-    ]
 
     return [
         {
@@ -351,13 +333,10 @@ def make_conversation(
         {
             "role": "user",
             "content": [
-                *[
-                    {
-                        "type": "image",
-                        "image": image,
-                    }
-                    for image in images
-                ],
+                {
+                    "type": "video",
+                    "path": video_path,
+                },
                 {
                     "type": "text",
                     "text": entry["question"]
