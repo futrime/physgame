@@ -178,9 +178,6 @@ async def main() -> None:
 
 ##### Per-Eval Code Begin #####
 
-DATASET_DIR = ".dev/PhysGame/PhysGame-Benchmark"
-N_FRAMES = 8
-
 
 type DatasetEntry = PhysGameBenchmarkEntry
 
@@ -207,26 +204,21 @@ def check_answers(model_outputs: List[ModelOutput]) -> Dict[str, float]:
 
 
 def load_data() -> PhysGameBenchmarkDataset:
-    return PhysGameBenchmarkDataset(DATASET_DIR)
+    return PhysGameBenchmarkDataset()
 
 
 async def make_conversation(
     entry: PhysGameBenchmarkEntry,
 ) -> List[ChatCompletionMessageParam]:
-    video_path = os.path.join(
-        DATASET_DIR, "PhysGame-Benchmark", entry["question_id"] + ".mp4"
-    )
-
     video, _ = await asyncio.to_thread(
-        image_utils.load_video, video_path, num_frames=N_FRAMES
+        image_utils.load_video, entry["video"], num_frames=16
     )
     video: NDArray[np.uint8]
-    assert video.shape[0] == N_FRAMES
 
     images: List[Image] = await asyncio.gather(
         *[
             asyncio.to_thread(image_transforms.to_pil_image, video[i])
-            for i in range(N_FRAMES)
+            for i in range(video.shape[0])
         ]
     )
 

@@ -26,8 +26,6 @@ from physgame.datasets.physinstruct import PhysInstructDataset
 
 logger = loguru.logger
 
-PHYSINSTRUCT_DATASET_PATH = ".dev/PhysGame/PhysInstruct-40k"
-
 
 @dataclass
 class TrainArgs:
@@ -63,7 +61,7 @@ class PromptCompletionEntry(TypedDict):
 
 
 def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
-    physinstruct = PhysInstructDataset(PHYSINSTRUCT_DATASET_PATH)
+    physinstruct = PhysInstructDataset()
 
     if max_dataset_size is None:
         max_dataset_size = len(physinstruct)

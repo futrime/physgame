@@ -18,18 +18,13 @@ from transformers.generation.utils import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.modeling_auto import (
-    AutoModel,
-    AutoModelForImageTextToText,
-    AutoModelForVision2Seq,
-)
+    AutoModel, AutoModelForImageTextToText, AutoModelForVision2Seq)
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.processing_utils import ProcessorMixin
 from transformers.utils.generic import PaddingStrategy
 
-from physgame.datasets.physgame_benchmark import (
-    PhysGameBenchmarkDataset,
-    PhysGameBenchmarkEntry,
-)
+from physgame.datasets.physgame_benchmark import (PhysGameBenchmarkDataset,
+                                                  PhysGameBenchmarkEntry)
 
 logger = loguru.logger
 
@@ -279,10 +274,6 @@ def main() -> None:
 
 ##### Per-Eval Code Begin #####
 
-DATASET_DIR = (
-    "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysGame-Benchmark"
-)
-
 
 type DatasetEntry = PhysGameBenchmarkEntry
 
@@ -309,14 +300,10 @@ def check_answers(model_outputs: List[ModelOutput]) -> Dict[str, float]:
 
 
 def load_data() -> PhysGameBenchmarkDataset:
-    return PhysGameBenchmarkDataset(DATASET_DIR)
+    return PhysGameBenchmarkDataset()
 
 
 def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
-    video_path = os.path.join(
-        DATASET_DIR, "PhysGame-Benchmark", entry["question_id"] + ".mp4"
-    )
-
     return [
         {
             "role": "system",
@@ -335,7 +322,7 @@ def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
             "content": [
                 {
                     "type": "video",
-                    "path": video_path,
+                    "path": entry["video"],
                 },
                 {
                     "type": "text",

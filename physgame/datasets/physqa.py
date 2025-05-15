@@ -7,6 +7,9 @@ from torch.utils.data import Dataset
 
 from physgame.datasets.physinstruct import PhysInstructEntry
 
+PHYINSTRUCT_DIR = ".dev/datasets/PhysGame/PhysInstruct-40k"
+PHYSQA_DIR = ".dev/datasets/PhysQA"
+
 type OptionId = Literal["A", "B", "C", "D"]
 
 
@@ -28,8 +31,8 @@ class RawEntry(TypedDict):
 class PhysQADataset(Dataset[PhysInstructEntry]):
     _entries: List[PhysInstructEntry]
 
-    def __init__(self, dataset_dir: str, pi_dataset_dir: str):
-        anno_path = os.path.join(dataset_dir, "physqa_anno.jsonl")
+    def __init__(self):
+        anno_path = os.path.join(PHYSQA_DIR, "physqa_anno.jsonl")
 
         with open(anno_path, "r", encoding="utf-8") as f:
             raw_entries: List[RawEntry] = [json.loads(line) for line in f.readlines()]
@@ -37,7 +40,7 @@ class PhysQADataset(Dataset[PhysInstructEntry]):
         self._entries = [
             PhysInstructEntry(
                 video_path=os.path.join(
-                    pi_dataset_dir, "PhysInstruct", raw_entry["video"]
+                    PHYINSTRUCT_DIR, "PhysInstruct", raw_entry["video"]
                 ),
                 question=shuffled_qa["question"]
                 + f"\n(A) {shuffled_qa['A']}"
@@ -64,7 +67,7 @@ class PhysQADataset(Dataset[PhysInstructEntry]):
         qa: RawQAItem,
     ) -> RawQAItem:
         local_random = random.Random(0)
-        
+
         options: List[OptionId] = ["A", "B", "C", "D"]
         local_random.shuffle(options)
 
@@ -75,9 +78,11 @@ class PhysQADataset(Dataset[PhysInstructEntry]):
             "C": options[2],
             "D": options[3],
         }
-        
+
         # Map from new positions back to original positions (for the answer)
-        reverse_mapping: Dict[OptionId, OptionId] = {v: k for k, v in option_mapping.items()}
+        reverse_mapping: Dict[OptionId, OptionId] = {
+            v: k for k, v in option_mapping.items()
+        }
 
         return RawQAItem(
             question=qa["question"],

@@ -1,6 +1,6 @@
-from argparse import ArgumentParser
 import datetime
 import os
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, TypedDict, Union, cast
 
@@ -29,8 +29,6 @@ import physgame.train.utils as utils
 from physgame.datasets.physdpo import PhysDPODataset
 
 logger = loguru.logger
-
-PHYSDPO_DATASET_PATH = ".dev/PhysGame/PhysDPO-10k"
 
 
 @dataclass
@@ -68,7 +66,7 @@ class PreferenceEntry(TypedDict):
 
 
 def prepare_dataset() -> Dataset:
-    physdpo = PhysDPODataset(PHYSDPO_DATASET_PATH)
+    physdpo = PhysDPODataset()
 
     n_max_gen = len(physdpo)
 
@@ -127,6 +125,7 @@ def prepare_dataset() -> Dataset:
 
     return dataset
 
+
 def parse_args() -> TrainArgs:
     parser = ArgumentParser()
     parser.add_argument(
@@ -153,6 +152,7 @@ def parse_args() -> TrainArgs:
         num_frames=args.num_frames,
     )
 
+
 def main() -> None:
     dotenv.load_dotenv()
 
@@ -161,7 +161,9 @@ def main() -> None:
     train_args = parse_args()
 
     if accelerator.is_main_process:
-        logger.info(f"Running {train_args.train_name} evaluation with args: {train_args}")
+        logger.info(
+            f"Running {train_args.train_name} evaluation with args: {train_args}"
+        )
         logger.info(f"Results will be saved to {train_args.output_dir}")
 
     model_output_dir = os.path.join(train_args.output_dir, "model")
