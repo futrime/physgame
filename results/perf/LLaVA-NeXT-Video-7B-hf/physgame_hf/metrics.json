@@ -1,0 +1,31 @@
+{
+  "backend": "HuggingFace",
+  "batch_size": 1,
+  "successful_requests": 100,
+  "benchmark_duration_s": 157.54,
+  "total_input_tokens": 135527,
+  "total_generated_tokens": 2189,
+  "request_throughput": 0.63,
+  "input_token_throughput": 860.28,
+  "output_token_throughput": 13.89,
+  "total_token_throughput": 874.17,
+  "concurrency": 1,
+  "latency": {
+    "e2e": {
+      "mean_ms": 591.23,
+      "median_ms": 550.87
+    },
+    "ttft": {
+      "mean_ms": 143.6,
+      "median_ms": 135.94,
+      "p99_ms": 144.95
+    },
+    "itl": {
+      "mean_ms": 27.38,
+      "median_ms": 27.41,
+      "p95_ms": 30.06,
+      "p99_ms": 30.7,
+      "max_ms": 30.89
+    }
+  }
+}
