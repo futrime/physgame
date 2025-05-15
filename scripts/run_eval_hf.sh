@@ -27,5 +27,5 @@ for eval in "${EVALS[@]}"; do
         --nproc_per_node $N_GPUS \
         $file \
         --output-base-dir ./runs/eval/ \
-        $@
+        $@ || true
 done

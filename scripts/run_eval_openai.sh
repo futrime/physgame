@@ -15,5 +15,5 @@ for eval in $EVALS; do
 
     python $file \
         --output-base-dir ./runs/eval/ \
-        $@
+        $@ || true
 done

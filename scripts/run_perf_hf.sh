@@ -25,5 +25,5 @@ for perf in "${PERFS[@]}"; do
 
     python $file \
         --output-base-dir ./runs/perf/ \
-        $@
+        $@ || true
 done

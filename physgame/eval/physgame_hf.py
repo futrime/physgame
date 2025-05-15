@@ -155,7 +155,7 @@ def parse_args() -> EvalArgs:
 
     if eval_args.num_frames is None and eval_args.video_fps is None:
         # If both num_frames and video_fps are None, use the default of 8.
-        eval_args.num_frames = 8
+        eval_args.num_frames = 16
 
     return eval_args
 
