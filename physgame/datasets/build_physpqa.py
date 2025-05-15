@@ -13,10 +13,14 @@ from google.genai.client import Client
 from pydantic import BaseModel
 from tqdm import tqdm
 
+from physgame.datasets.physdpo import PhysDPOEntry
+
 logger = loguru.logger
 
-PI_VIDEO_DIR = "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysInstruct-40k/PhysInstruct"
-PI_ANNO_PATH = "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysInstruct-40k/PhysInstruct_anno_40k.json"
+PHYSDPO_ANNO_PATH = "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysDPO-10k/PhysDPO_anno_10k.json"
+PHYSDPO_VIDEO_DIR = (
+    "/lustre/fs12/portfolios/nvr/users/zijzhang/datasets/PhysGame/PhysDPO-10k/PhysDPO"
+)
 
 
 @dataclass
@@ -39,6 +43,15 @@ class DatasetArgs:
         file_name = os.path.basename(__file__)
         file_name = file_name.replace(".py", "").replace("build_", "")
         return file_name
+
+
+class PhysPQAEntry(TypedDict):
+    idx: int
+    video: str
+    question: str
+    options: Dict[Literal["A", "B", "C", "D"], str]
+    chosen_answer: str
+    rejected_answer: str
 
 
 def parse_args() -> DatasetArgs:
@@ -83,7 +96,7 @@ async def main() -> None:
 
     output_file_path = os.path.join(
         dataset_args.output_dir,
-        f"physqa_anno.jsonl",
+        f"physpqa_anno.jsonl",
     )
     os.makedirs(dataset_args.output_dir, exist_ok=True)
 
@@ -92,15 +105,10 @@ async def main() -> None:
     # Prepare Gemini API client.
     client = Client()
 
-    # Prepare seed dataset.
-    class PhysInstructRawEntry(TypedDict):
-        video: str
-        QA: List[Dict[Literal["i", "q", "a"], str]]
+    with open(PHYSDPO_ANNO_PATH, "r", encoding="utf-8") as f:
+        physdpo_anno: List[PhysDPOEntry] = json.load(f)
 
-    with open(PI_ANNO_PATH, "r", encoding="utf-8") as f:
-        pi_anno: List[PhysInstructRawEntry] = json.load(f)
-
-    pi_anno = pi_anno[: dataset_args.num_entries]
+    physdpo_anno = physdpo_anno[: dataset_args.num_entries]
 
     if os.path.exists(output_file_path):
         existing_entry_idxs: Set[int] = set()
@@ -110,19 +118,19 @@ async def main() -> None:
                 idx = json.loads(line)["idx"]
                 existing_entry_idxs.add(idx)
 
-        pi_entries: List[Tuple[int, PhysInstructRawEntry]] = [
+        physdpo_entries: List[Tuple[int, PhysDPOEntry]] = [
             (i, entry)
-            for i, entry in enumerate(pi_anno)
+            for i, entry in enumerate(physdpo_anno)
             if i not in existing_entry_idxs
         ]
 
     else:
-        pi_entries: List[Tuple[int, PhysInstructRawEntry]] = [
-            (i, entry) for i, entry in enumerate(pi_anno)
+        physdpo_entries: List[Tuple[int, PhysDPOEntry]] = [
+            (i, entry) for i, entry in enumerate(physdpo_anno)
         ]
 
-    logger.info(f"#entries to generate: {len(pi_entries)}.")
-    logger.info(f"#entries to skip: {len(pi_anno) - len(pi_entries)}.")
+    logger.info(f"#entries to generate: {len(physdpo_entries)}.")
+    logger.info(f"#entries to skip: {len(physdpo_anno) - len(physdpo_entries)}.")
 
     # Generate QA entries.
     class ModelOutputItem(BaseModel):
@@ -131,17 +139,13 @@ async def main() -> None:
         B: str
         C: str
         D: str
-        answer: str
+        chosen_answer: str
+        rejected_answer: str
 
-    class PhysQAEntry(TypedDict):
-        idx: int
-        video: str
-        QA: List[Dict[Literal["question", "A", "B", "C", "D", "answer"], str]]
-
-    pi_entry_queue: Queue[Tuple[int, PhysInstructRawEntry]] = Queue(
+    physdpo_entry_queue: Queue[Tuple[int, PhysDPOEntry]] = Queue(
         maxsize=dataset_args.num_workers * 2
     )
-    pqa_entry_queue: Queue[PhysQAEntry] = Queue()
+    physpqa_entry_queue: Queue[PhysPQAEntry] = Queue()
 
     stopped = False
 
@@ -150,26 +154,26 @@ async def main() -> None:
             await asyncio.sleep(0.1)  # To avoid busy waiting.
 
             try:
-                idx, pi_entry = pi_entry_queue.get_nowait()
+                idx, physdpo_entry = physdpo_entry_queue.get_nowait()
             except QueueEmpty:
                 await asyncio.sleep(0.1)
                 continue
 
-            pi_entry_queue.task_done()
+            physdpo_entry_queue.task_done()
 
             video_path = os.path.join(
-                PI_VIDEO_DIR,
-                pi_entry["video"],
+                PHYSDPO_VIDEO_DIR,
+                physdpo_entry["video"],
             )
 
             try:
                 with open(video_path, "rb") as f:
                     video_bytes = await asyncio.to_thread(f.read)
 
-                # Skip if exceeding Gemini's limit (314572800 bytes) and preserve a safe redundancy.
+                # Skip if exceeding Gemini's limit (20MB) and preserve a safe redundancy.
                 if len(video_bytes) > 19 * 1024 * 1024:
                     logger.warning(
-                        f"Video of PhysInstruct entry {idx} is too large ({len(video_bytes) / 1024 / 1024:.2f}MB > 16MB). Skipping."
+                        f"Video of PhysDPO entry {idx} is too large ({len(video_bytes) / 1024 / 1024:.2f}MB > 16MB). Skipping."
                     )
                     continue
 
@@ -181,42 +185,36 @@ async def main() -> None:
                             mime_type="video/mp4",
                         ),
                         """
-                        Based on the video and the physics glitch described in the ground truth answers, create a list of four-option multiple-choice questions. 
+                        Based on the video, create a four-option multiple-choice question about the physics glitch shown.
                         
                         Important requirements:
-                        - DO NOT modify the question text from the original question.
-                        - Use the provided answer as the correct option, though you may refine its language without changing its meaning.
-                        - Create three plausible distractor options following these principles:
-                        - Distractors should relate to actual objects and actions seen in the video
-                        - Distractors should describe plausible but incorrect physics glitches
-                        - All four options (A, B, C, D) should be of similar length to avoid bias
-                        - Each option should be distinct and focus on different aspects of potential physics violations
+                        - Use the original question text without modification.
+                        - Include the "chosen answer" as the correct option (you may refine its language without changing meaning).
+                        - Include the "rejected answer" as one of the distractors (you may refine its language).
+                        - Create TWO additional distractor options following these principles:
+                          - Distractors should relate to actual objects and actions seen in the video
+                          - Distractors should describe plausible but incorrect physics glitches
+                          - All four options should be of similar length to avoid bias
+                          - Each option should be distinct and focus on different aspects of potential physics violations
                         
-                        For the correct answer, incorporate all physics glitches visible in the video. Ensure your options are specific to the video content and require understanding the visual information to select correctly.
-                        
-                        Output your response as a list of JSON objects with the following format:
+                        Output your response as a JSON object with the following format:
                         {
                         "question": "[original_question]",
                         "A": "[an_option]",
                         "B": "[an_option]",
                         "C": "[an_option]",
                         "D": "[an_option]",
-                        "answer": "[correct_option (A, B, C, or D)]"
+                        "chosen_answer": "[option_of_chosen_answer (A, B, C, or D)]",
+                        "rejected_answer": "[option_of_rejected_answer (A, B, C, or D)]"
                         }
                         
-                        Distribute the correct answer position (A, B, C, or D) randomly to ensure an equal distribution across questions.
+                        Distribute the options (A, B, C, or D) randomly to ensure no positional bias.
                         """
-                        + "\n\n".join(
-                            [
-                                f"""
-                        <qa_pair>
-                        Question: {entry['QA'][i]['q']}
-                        Ground Truth Answer: {entry['QA'][i]['a']}
-                        </qa_pair>
-                        """
-                                for i in range(len(entry["QA"]))
-                            ]
-                        ),
+                        + f"""
+                        Question: {physdpo_entry["prompt"]}
+                        Chosen Answer: {physdpo_entry["chosen"]}
+                        Rejected Answer: {physdpo_entry["rejected"]}
+                        """,
                     ],
                     config={
                         "response_mime_type": "application/json",
@@ -226,32 +224,30 @@ async def main() -> None:
 
                 model_outputs = cast(List[ModelOutputItem], response.parsed)
 
-                physqa_entry = PhysQAEntry(
+                physpqa_entry = PhysPQAEntry(
                     idx=idx,
-                    video=entry["video"],
-                    QA=[
-                        {
-                            "question": item.question,
-                            "A": item.A,
-                            "B": item.B,
-                            "C": item.C,
-                            "D": item.D,
-                            "answer": item.answer,
-                        }
-                        for item in model_outputs
-                    ],
+                    video=video_path,
+                    question=model_outputs[0].question,
+                    options={
+                        "A": model_outputs[0].A,
+                        "B": model_outputs[0].B,
+                        "C": model_outputs[0].C,
+                        "D": model_outputs[0].D,
+                    },
+                    chosen_answer=model_outputs[0].chosen_answer,
+                    rejected_answer=model_outputs[0].rejected_answer,
                 )
 
                 # Save the entry to the queue.
-                await pqa_entry_queue.put(physqa_entry)
+                await physpqa_entry_queue.put(physpqa_entry)
 
             except Exception as e:
                 logger.error(f"Error processing entry {idx} (video: {video_path}): {e}")
 
-    async def save_pqa_entries() -> None:
-        while not pqa_entry_queue.empty():
+    async def save_output_entries() -> None:
+        while not physpqa_entry_queue.empty():
             await asyncio.sleep(0)
-            pqa_entry = pqa_entry_queue.get_nowait()
+            pqa_entry = physpqa_entry_queue.get_nowait()
             with open(output_file_path, "a") as f:
                 json.dump(pqa_entry, f)
                 f.write("\n")
@@ -261,21 +257,21 @@ async def main() -> None:
         task = asyncio.create_task(gen_worker())
         tasks.append(task)
 
-    for idx, entry in tqdm(pi_entries):
-        await pi_entry_queue.put((idx, entry))
+    for idx, entry in tqdm(physdpo_entries):
+        await physdpo_entry_queue.put((idx, entry))
 
-        if pi_entry_queue.qsize() >= dataset_args.save_interval:
-            await save_pqa_entries()
+        if physdpo_entry_queue.qsize() >= dataset_args.save_interval:
+            await save_output_entries()
 
     logger.info("Waiting for all entries to be processed...")
-    await pi_entry_queue.join()
+    await physdpo_entry_queue.join()
 
     logger.info("All entries processed. Stopping workers...")
     stopped = True
     await asyncio.gather(*tasks)
 
     # Save any remaining entries in the queue.
-    await save_pqa_entries()
+    await save_output_entries()
 
     logger.info("Done.")
 
