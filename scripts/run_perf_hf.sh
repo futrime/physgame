@@ -3,6 +3,9 @@
 set -e
 
 PERFS=(
+    "sharegpt_mm"
+    "physgame_eager"
+    "physgame_fa2"
     "physgame"
     "sharegpt"
 )
