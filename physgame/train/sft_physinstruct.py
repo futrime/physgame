@@ -134,7 +134,6 @@ def parse_args() -> TrainArgs:
     parser.add_argument(
         "--max-dataset-size",
         type=int,
-        default=20000,
     )
     parser.add_argument(
         "--num-frames",

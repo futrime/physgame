@@ -218,7 +218,7 @@ def main() -> None:
         outputs = model.generate(
             **inputs,
             do_sample=False,
-            max_new_tokens=16,
+            max_new_tokens=256,
             temperature=None,
             top_p=None,
             top_k=None,
@@ -288,8 +288,39 @@ def check_answers(model_outputs: List[ModelOutput]) -> Dict[str, float]:
     correct = 0
 
     for model_output in tqdm(model_outputs, desc="Checking answers"):
-        match = re.search(r"\(?([A-D])\)", model_output["output"])
-        if match and match.group(1) == model_output["answer"]:
+        output = model_output["output"]
+        answer = model_output["answer"]
+        extracted_answer = None
+        
+        # Case insensitive search
+        output_lower = output.lower()
+        
+        # Priority 1: Find the last option letter before "is the answer"
+        if "is the answer" in output_lower:
+            substring_idx = re.search(r"is the answer", output, re.IGNORECASE)
+            if substring_idx:
+                substring_idx = substring_idx.start()
+
+                text_before = output[:substring_idx]
+                match = re.search(r"\(([A-D])\)", text_before)
+                if match:
+                    extracted_answer = match.group(1)
+        
+        # Priority 2: Find the first option letter after "answer"
+        elif "answer" in output_lower:
+            answer_idx = output_lower.find("answer")
+            text_after = output[answer_idx + 6:]  # Skip "answer"
+            match = re.search(r"\(([A-D])\)", text_after, re.IGNORECASE)
+            if match:
+                extracted_answer = match.group(1)
+        
+        # Priority 3: Find the first option letter in the entire output
+        else:
+            match = re.search(r"\(([A-D])\)", output, re.IGNORECASE)
+            if match:
+                extracted_answer = match.group(1)
+
+        if extracted_answer == answer:
             correct += 1
 
     accuracy = correct / len(model_outputs)

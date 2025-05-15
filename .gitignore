@@ -175,7 +175,8 @@ cython_debug/
 
 
 
-.vscode/
-.dev/
-archive/
-runs/
+/.vscode/
+/.dev/
+/archive/
+/results/eval/**/outputs.jsonl
+/runs/
