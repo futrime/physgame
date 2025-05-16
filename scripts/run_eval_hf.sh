@@ -4,6 +4,7 @@ set -e
 
 EVALS=(
     "physgame"
+    "physgame_nosys"
 )
 
 source scripts/prepare_env.sh

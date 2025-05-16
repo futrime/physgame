@@ -115,6 +115,15 @@ def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
             prompt_completion = PromptCompletionEntry(
                 prompt=[
                     {
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Watch the video carefully and analyze the events and object movements, focusing on any inconsistencies with physical laws. Identify and highlight instances where the behavior deviates from expected real-world physics, and select the most accurate option to describe the detected glitch.\n",
+                            },
+                        ],
+                    },
+                    {
                         "role": "user",
                         "content": [
                             {
@@ -123,11 +132,15 @@ def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
                             },
                             {
                                 "type": "text",
-                                "text": "Watch the video carefully and analyze the events and object movements, "
-                                + "focusing on any inconsistencies with physical laws. "
-                                + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                                + "and select the most accurate option to describe the detected glitch.\n"
-                                + entry["question"],
+                                "text": entry["question"]
+                                + "\n"
+                                + "\n".join(
+                                    [
+                                        f"({key}) {value}"
+                                        for key, value in entry["options"].items()
+                                    ]
+                                )
+                                + "\nOnly give the best option.",
                             },
                         ],
                     },
@@ -138,7 +151,7 @@ def prepare_dataset(max_dataset_size: Optional[int]) -> Dataset:
                         "content": [
                             {
                                 "type": "text",
-                                "text": entry["answer"],
+                                "text": "Best option:(" + entry["answer"] + ")",
                             }
                         ],
                     }
@@ -196,6 +209,14 @@ def main() -> None:
 
     os.makedirs(model_output_dir, exist_ok=True)
 
+    if not os.path.exists(os.path.join(train_args.output_dir, "train_id.txt")):
+        train_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        with open(os.path.join(train_args.output_dir, "train_id.txt"), "w") as f:
+            f.write(train_id)
+    else:
+        with open(os.path.join(train_args.output_dir, "train_id.txt"), "r") as f:
+            train_id = f.read().strip()
+
     trainer_config = SFTConfig(
         bf16=True,
         max_grad_norm=5.0,
@@ -214,7 +235,7 @@ def main() -> None:
         per_device_train_batch_size=3,
         remove_unused_columns=False,
         report_to="wandb",
-        run_name=f"{train_args.model_name}-{train_args.train_name}-{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        run_name=f"{train_args.model_name}-{train_args.train_name}-{train_id}",
         save_steps=100,
         save_strategy="steps",
         save_total_limit=2,
@@ -227,7 +248,6 @@ def main() -> None:
         wandb.init(
             dir=os.path.join(train_args.output_dir, "wandb"),
             name=trainer_config.run_name,
-            group=f"{train_args.model_name}-{train_args.train_name}",
         )
 
     # 1. Load dataset.

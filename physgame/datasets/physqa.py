@@ -5,12 +5,17 @@ from typing import Dict, List, Literal, TypedDict
 
 from torch.utils.data import Dataset
 
-from physgame.datasets.physinstruct import PhysInstructEntry
-
 PHYINSTRUCT_DIR = ".dev/datasets/PhysGame/PhysInstruct-40k"
 PHYSQA_DIR = ".dev/datasets/PhysQA"
 
 type OptionId = Literal["A", "B", "C", "D"]
+
+
+class PhysQAEntry(TypedDict):
+    video_path: str
+    question: str
+    options: Dict[Literal["A", "B", "C", "D"], str]
+    answer: str
 
 
 class RawQAItem(TypedDict):
@@ -28,8 +33,8 @@ class RawEntry(TypedDict):
     QA: List[RawQAItem]
 
 
-class PhysQADataset(Dataset[PhysInstructEntry]):
-    _entries: List[PhysInstructEntry]
+class PhysQADataset(Dataset[PhysQAEntry]):
+    _entries: List[PhysQAEntry]
 
     def __init__(self):
         anno_path = os.path.join(PHYSQA_DIR, "physqa_anno.jsonl")
@@ -38,25 +43,25 @@ class PhysQADataset(Dataset[PhysInstructEntry]):
             raw_entries: List[RawEntry] = [json.loads(line) for line in f.readlines()]
 
         self._entries = [
-            PhysInstructEntry(
+            PhysQAEntry(
                 video_path=os.path.join(
                     PHYINSTRUCT_DIR, "PhysInstruct", raw_entry["video"]
                 ),
-                question=shuffled_qa["question"]
-                + f"\n(A) {shuffled_qa['A']}"
-                + f"\n(B) {shuffled_qa['B']}"
-                + f"\n(C) {shuffled_qa['C']}"
-                + f"\n(D) {shuffled_qa['D']}"
-                + "\nOnly give the best option enclosed in parentheses, i.e. (A), (B), (C), or (D). "
-                + "You must always give an option, even if you are not sure.",
-                answer=f"({shuffled_qa['answer']})",
+                question=qa["question"],
+                options={
+                    "A": shuffled_qa["A"],
+                    "B": shuffled_qa["B"],
+                    "C": shuffled_qa["C"],
+                    "D": shuffled_qa["D"],
+                },
+                answer=shuffled_qa["answer"],
             )
             for raw_entry in raw_entries
             for qa in raw_entry["QA"]
             for shuffled_qa in [self._shuffle_qa_options(qa)]
         ]
 
-    def __getitem__(self, index: int) -> PhysInstructEntry:
+    def __getitem__(self, index: int) -> PhysQAEntry:
         return self._entries[index]
 
     def __len__(self) -> int:
