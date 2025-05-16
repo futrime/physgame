@@ -184,7 +184,7 @@ def main() -> None:
         inputs = processor.apply_chat_template(
             conversations,
             add_generation_prompt=True,
-            num_frames=8,
+            num_frames=16,
             padding=PaddingStrategy.LONGEST,
             padding_side="left",
             return_dict=True,

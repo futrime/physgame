@@ -211,7 +211,7 @@ async def make_conversation(
     entry: PhysGameBenchmarkEntry,
 ) -> List[ChatCompletionMessageParam]:
     video, _ = await asyncio.to_thread(
-        image_utils.load_video, entry["video"], num_frames=16
+        image_utils.load_video, entry["video"], num_frames=8
     )
     video: NDArray[np.uint8]
 
