@@ -4,8 +4,6 @@ set -e
 
 EVALS=(
     "physgame"
-    "physgame_4"
-    "physgame_16"
 )
 
 source scripts/prepare_env.sh

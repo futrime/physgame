@@ -3,7 +3,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict, cast
+from typing import Any, Dict, List, TypedDict, cast
 
 import loguru
 import torch
@@ -183,7 +183,7 @@ def main() -> None:
 
         inputs = processor.apply_chat_template(
             conversations,
-            add_generation_prompt=True,
+            continue_final_message=True,
             num_frames=8,
             padding=PaddingStrategy.LONGEST,
             padding_side="left",
@@ -269,47 +269,25 @@ class ModelOutput(TypedDict):
 
 def check_answers(model_outputs: List[ModelOutput]) -> Dict[str, float]:
     correct = 0
+    valid = 0
 
     for model_output in tqdm(model_outputs, desc="Checking answers"):
         output = model_output["output"]
         answer = model_output["answer"]
-        extracted_answer = None
-        
-        # Case insensitive search
-        output_lower = output.lower()
-        
-        # Priority 1: Find the last option letter before "is the answer"
-        if "is the answer" in output_lower:
-            substring_idx = re.search(r"is the answer", output, re.IGNORECASE)
-            if substring_idx:
-                substring_idx = substring_idx.start()
 
-                text_before = output[:substring_idx]
-                match = re.search(r"\(([A-D])\)", text_before)
-                if match:
-                    extracted_answer = match.group(1)
-        
-        # Priority 2: Find the first option letter after "answer"
-        elif "answer" in output_lower:
-            answer_idx = output_lower.find("answer")
-            text_after = output[answer_idx + 6:]  # Skip "answer"
-            match = re.search(r"\(([A-D])\)", text_after, re.IGNORECASE)
-            if match:
-                extracted_answer = match.group(1)
-        
-        # Priority 3: Find the first option letter in the entire output
-        else:
-            match = re.search(r"\(([A-D])\)", output, re.IGNORECASE)
-            if match:
-                extracted_answer = match.group(1)
+        match = re.search(r"([A-D])\)", output, re.IGNORECASE)
+        if match:
+            extracted_answer = match.group(1)
+            valid += 1
 
-        if extracted_answer == answer:
-            correct += 1
+            if extracted_answer == answer:
+                correct += 1
 
     accuracy = correct / len(model_outputs)
 
     return {
         "accuracy": accuracy,
+        "valid": valid,
     }
 
 
@@ -324,10 +302,7 @@ def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
             "content": [
                 {
                     "type": "text",
-                    "text": "Watch the video carefully and analyze the events and object movements, "
-                    + "focusing on any inconsistencies with physical laws. "
-                    + "Identify and highlight instances where the behavior deviates from expected real-world physics, "
-                    + "and select the most accurate option to describe the detected glitch.\n",
+                    "text": "Watch the video carefully and analyze the events and object movements, focusing on any inconsistencies with physical laws. Identify and highlight instances where the behavior deviates from expected real-world physics, and select the most accurate option to describe the detected glitch.\n",
                 },
             ],
         },
@@ -345,8 +320,16 @@ def make_conversation(entry: PhysGameBenchmarkEntry) -> List[Dict[str, Any]]:
                     + "\n".join(
                         [f"({key}) {value}" for key, value in entry["options"].items()]
                     )
-                    + "\nOnly give the best option enclosed in parentheses, i.e. (A), (B), (C), or (D). "
-                    + "You must always give an option, even if you are not sure.",
+                    + "\nOnly give the best option.",
+                },
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Best option:(",
                 },
             ],
         },
