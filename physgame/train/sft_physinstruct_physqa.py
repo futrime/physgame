@@ -35,7 +35,6 @@ class TrainArgs:
     output_base_dir: str
 
     max_dataset_size: Optional[int]
-    num_frames: int
 
     @property
     def model_name(self) -> str:
@@ -170,11 +169,6 @@ def parse_args() -> TrainArgs:
         "--max-dataset-size",
         type=int,
     )
-    parser.add_argument(
-        "--num-frames",
-        type=int,
-        default=8,
-    )
 
     args, _ = parser.parse_known_args()
 
@@ -182,7 +176,6 @@ def parse_args() -> TrainArgs:
         model=args.model,
         output_base_dir=args.output_base_dir,
         max_dataset_size=args.max_dataset_size,
-        num_frames=args.num_frames,
     )
 
 
@@ -275,7 +268,7 @@ def main() -> None:
     def collate_fn(entries: List[PromptCompletionEntry]) -> BatchFeature:
         prompt_inputs = processor.apply_chat_template(
             [entry["prompt"] for entry in entries],
-            num_frames=train_args.num_frames,
+            num_frames=8,
             do_resize=True,
             size={
                 "longest_edge": 1280 * 720,
