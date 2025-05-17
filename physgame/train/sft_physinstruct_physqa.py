@@ -248,6 +248,8 @@ def main() -> None:
         wandb.init(
             dir=os.path.join(train_args.output_dir, "wandb"),
             name=trainer_config.run_name,
+            id=trainer_config.run_name,
+            project="physgame",
         )
 
     # 1. Load dataset.
