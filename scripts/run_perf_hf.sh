@@ -3,11 +3,12 @@
 set -e
 
 PERFS=(
-    "sharegpt_mm"
-    "physgame_eager"
-    "physgame_fa2"
-    "physgame"
-    "sharegpt"
+    "sharegpt_mm_nocache"
+    # "sharegpt_mm"
+    # "physgame_eager"
+    # "physgame_fa2"
+    # "physgame"
+    # "sharegpt"
 )
 
 source scripts/prepare_env.sh
